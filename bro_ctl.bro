@@ -1,6 +1,8 @@
 
 const pop3_ports = { 110/tcp };
 const imap_ports = { 143/tcp };
+const netflow_ports = { 12345/udp };
+
 
 global routerID:string;
 
@@ -8,6 +10,7 @@ event bro_init() {
     routerID = "123456";
     Analyzer::register_for_ports(Analyzer::ANALYZER_POP3, pop3_ports);
     Analyzer::register_for_ports(Analyzer::ANALYZER_IMAP, imap_ports);
+    Analyzer::register_for_ports(Analyzer::ANALYZER_NETFLOW, netflow_ports); 
 }
 
 type recordRequest: record {
@@ -71,6 +74,88 @@ redef http_entity_data_delivery_size = 1000000;
 redef use_conn_size_analyzer = T;
 redef FTP::default_capture_password = T;
 
+
+# event netflow5_message(u: connection, stime: double, etime:double, src_h:addr, dst_h:addr,src_p:count, dst_p:count, pt:count,pkts:count, Octets:count){
+#     local strCommand:string;
+#     strCommand = fmt("{\"rid\":\"%s\",\"table_type\":\"netflow\",\"starttime\":\"%s\",\"endtime\":\"%s\",\"src_h\":\"%s\",\"dst_h\":\"%s\", \"src_p\":\"%s\",\"dst_p\":\"%s\", \"protocol\":\"%s\", \"pkts\":\"%s\", \"Octets\":\"%s\"}",
+#         routerID,
+#         strftime("%Y-%m-%d %H:%M:%S",double_to_time(stime)),   
+#         strftime("%Y-%m-%d %H:%M:%S",double_to_time(etime)),
+#         src_h,
+#         dst_h,
+#         src_p,
+#         dst_p,
+#         pt,
+#         pkts,
+#         Octets);
+#     print strCommand;
+#     print "##################";
+#     print "\n";
+#     ErrorDebug::debug(strCommand);
+# }
+
+
+type recordTelnetMsg: record {
+    strInputData: string &optional;
+    strOutputData: string &optional;
+};
+
+global gtableTelnetMsg: table[string] of recordTelnetMsg &create_expire=30min;
+
+event login_input_line(c: connection, line: string){
+    if (c$uid in gtableTelnetMsg){
+        if (gtableTelnetMsg[c$uid]?$strInputData){
+            gtableTelnetMsg[c$uid]$strInputData += line;
+            gtableTelnetMsg[c$uid]$strInputData += "\n";
+        }else{
+            gtableTelnetMsg[c$uid]$strInputData = line;
+            gtableTelnetMsg[c$uid]$strInputData += "\n";
+        }
+    }else{
+        gtableTelnetMsg[c$uid] = [
+            $strInputData = "",
+            $strOutputData = ""
+        ];
+        gtableTelnetMsg[c$uid]$strInputData = line;
+        gtableTelnetMsg[c$uid]$strInputData += "\n";
+    }
+}
+
+event login_output_line(c: connection, line: string){
+    if (c$uid in gtableTelnetMsg){
+        if (gtableTelnetMsg[c$uid]?$strOutputData){
+            gtableTelnetMsg[c$uid]$strOutputData += line;
+            gtableTelnetMsg[c$uid]$strOutputData += "\n";
+        }else{
+            gtableTelnetMsg[c$uid]$strOutputData = line;
+            gtableTelnetMsg[c$uid]$strOutputData += "\n";
+        }
+    }else{
+        gtableTelnetMsg[c$uid] = [
+            $strInputData = "",
+            $strOutputData = ""
+        ];
+        gtableTelnetMsg[c$uid]$strOutputData = line;
+        gtableTelnetMsg[c$uid]$strOutputData += "\n";
+    }    
+}
+
+
+function processTelnet(c:connection,recordTempTelnetMsg:recordTelnetMsg) {
+    local strCommand:string;
+    strCommand = fmt("{\"rid\":\"%s\",\"table_type\":\"telnet\",\"srcip\":\"%s\",\"srcport\":\"%s\",\"dstip\":\"%s\",\"dstport\":\"%s\",\"input\":\"%s\",\"output\":\"%s\"}",
+            routerID,
+            c$id$orig_h,
+		    c$id$orig_p, 
+		    c$id$resp_h,
+		    c$id$resp_p,
+            encode_base64(recordTempTelnetMsg$strInputData),
+            encode_base64(recordTempTelnetMsg$strOutputData));
+    ErrorDebug::debug(strCommand);
+    print strCommand;
+    print "##################";
+    print "\n";
+}
 
 event connection_established(c: connection){
     local vpntype:string;  
