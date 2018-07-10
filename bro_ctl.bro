@@ -2,12 +2,13 @@
 const pop3_ports = { 110/tcp };
 const imap_ports = { 143/tcp };
 const netflow_ports = { 12345/udp };
-
+const telnet_ports = { 23/tcp };
 
 global routerID:string;
 
 event bro_init() {
     routerID = "123456";
+Analyzer::register_for_ports(Analyzer::ANALYZER_TELNET, telnet_ports);
     Analyzer::register_for_ports(Analyzer::ANALYZER_POP3, pop3_ports);
     Analyzer::register_for_ports(Analyzer::ANALYZER_IMAP, imap_ports);
     Analyzer::register_for_ports(Analyzer::ANALYZER_NETFLOW, netflow_ports); 
